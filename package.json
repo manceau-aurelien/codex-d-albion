@@ -1,0 +1,31 @@
+{
+  "name": "le-codex-d-albion",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Le Codex d'Albion — Jeu d'apprentissage incrémental de l'anglais (Briques, Formules inductives, SRS FSRS & Boss Audio)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:srs": "node scripts/test-srs.mjs",
+    "generate:tts": "node scripts/generate-tts.mjs"
+  },
+  "dependencies": {
+    "dexie": "^4.0.11",
+    "lucide-react": "^0.475.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0",
+    "vite-plugin-pwa": "^0.21.1"
+  }
+}

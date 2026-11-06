@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const OUT_DIR = path.resolve('public/audio/tier1');
+const OUT_DIR = path.resolve('audio/tier1');
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 const BRICKS = [
@@ -43,9 +43,12 @@ const BOSS_SENTENCES = [
   ['boss_10_main', 'Actually, the old guard is afraid: he sees a big shadow, the door is not open.']
 ];
 
+let failedCount = 0;
+
 function synthWithEdgeTts(text, voice, outFile, rate = '+0%', pitch = '+0Hz') {
+  if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) return true; // déjà généré
   try {
-    execFileSync('edge-tts', [
+    execFileSync(process.env.EDGE_TTS_BIN || 'edge-tts', [
       '--voice', voice,
       '--text', text,
       `--rate=${rate}`,
@@ -54,11 +57,12 @@ function synthWithEdgeTts(text, voice, outFile, rate = '+0%', pitch = '+0Hz') {
     ], { stdio: 'ignore' });
     return true;
   } catch {
+    failedCount++;
     return false;
   }
 }
 
-console.log('Génération des fichiers Neural TTS dans public/audio/tier1/ ...');
+console.log('Génération des fichiers Neural TTS dans audio/tier1/ ...');
 let generatedCount = 0;
 
 for (const [id, word] of BRICKS) {
@@ -71,6 +75,7 @@ for (const [id, sentence] of BOSS_SENTENCES) {
   if (synthWithEdgeTts(sentence, 'en-GB-RyanNeural', path.join(OUT_DIR, `boss_slow_${id.replace('boss_', '')}.mp3`), '-20%', '-5Hz')) generatedCount++;
 }
 
+if (failedCount > 0) console.log(`⚠️ ${failedCount} fichiers n'ont pas pu être générés (relance le script pour les compléter).`);
 if (generatedCount > 0) {
   console.log(`✅ ${generatedCount} fichiers audio neuronaux générés dans ${OUT_DIR}`);
 } else {

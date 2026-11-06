@@ -67,6 +67,17 @@ import {
   persistPlayerSaveSync,
   markIntentionalOverwrite
 } from './db/codexDb';
+import {
+  downloadSaveFile,
+  copySaveToClipboard,
+  parseSaveText,
+  summarizeSave,
+  isImportWorse,
+  getLastExportAt,
+  readDevMode,
+  writeDevMode,
+  SaveSummary
+} from './db/backup';
 
 // ============================================================================
 // COMPOSANT BRIQUE DE PIERRE (<BrickChip />)
@@ -213,6 +224,96 @@ export default function App({
   const [soundMuted, setSoundMuted] = useState(false);
   const [showDataModal, setShowDataModal] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
+  const [importPreview, setImportPreview] = useState<
+    { state: PlayerSaveState; summary: SaveSummary } | null
+  >(null);
+  const [importError, setImportError] = useState('');
+  const [dataNotice, setDataNotice] = useState('');
+  const [lastExportAt, setLastExportAt] = useState<number | null>(() => getLastExportAt());
+
+  // Mode développeur (caché) : 7 appuis sur le titre, ou ?dev=1 dans l'adresse
+  const [devMode, setDevMode] = useState<boolean>(() => readDevMode());
+  const titleTapsRef = useRef<{ count: number; last: number }>({ count: 0, last: 0 });
+  const handleTitleTap = () => {
+    const now = Date.now();
+    const t = titleTapsRef.current;
+    t.count = now - t.last < 1500 ? t.count + 1 : 1;
+    t.last = now;
+    if (t.count >= 7) {
+      t.count = 0;
+      const next = !devMode;
+      writeDevMode(next);
+      setDevMode(next);
+      setDataNotice(next ? 'Mode développeur activé.' : 'Mode développeur désactivé.');
+    }
+  };
+  const disableDevMode = () => {
+    writeDevMode(false);
+    setDevMode(false);
+  };
+
+  const resetVirtualClock = () => {
+    setSaveState((prev) => ({ ...prev, virtualDaysOffset: 0 }));
+  };
+
+  const closeDataModal = () => {
+    setShowDataModal(false);
+    setImportJsonText('');
+    setImportPreview(null);
+    setImportError('');
+    setDataNotice('');
+  };
+
+  const previewImport = (text: string) => {
+    const result = parseSaveText(text);
+    if (result.ok && result.state && result.summary) {
+      setImportPreview({ state: result.state, summary: result.summary });
+      setImportError('');
+    } else {
+      setImportPreview(null);
+      setImportError(result.error || 'Sauvegarde illisible.');
+    }
+  };
+
+  const handleExportFile = () => {
+    downloadSaveFile(saveState);
+    setLastExportAt(Date.now());
+    setDataNotice('Fichier de sauvegarde téléchargé. Garde-le en lieu sûr (Drive, mail, etc.).');
+  };
+
+  const handleCopyCode = async () => {
+    const ok = await copySaveToClipboard(saveState);
+    if (ok) setLastExportAt(Date.now());
+    setDataNotice(ok ? 'Sauvegarde copiée dans le presse-papiers.' : 'Copie impossible : utilise « Télécharger ».');
+  };
+
+  const handleImportFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > 5_000_000) {
+      setImportPreview(null);
+      setImportError('Fichier trop volumineux pour être une sauvegarde.');
+      return;
+    }
+    const text = await file.text();
+    setImportJsonText(text);
+    previewImport(text);
+  };
+
+  const confirmImport = () => {
+    if (!importPreview) return;
+    if (
+      isImportWorse(saveState, importPreview.state) &&
+      !window.confirm(
+        'Cette sauvegarde est MOINS avancée que ta progression actuelle.\n\nElle va la remplacer. Continuer ?'
+      )
+    ) {
+      return;
+    }
+    markIntentionalOverwrite();
+    setSaveState(importPreview.state);
+    sfx.playSuccessRune();
+    closeDataModal();
+  };
 
   // Chargement initial depuis IndexedDB (Dexie) ou localStorage
   useEffect(() => {
@@ -503,7 +604,7 @@ export default function App({
             )}
             <div>
               <h1 className="font-serif font-bold tracking-wider text-sm sm:text-base text-amber-100 flex items-center gap-2">
-                <span>LE CODEX D'ALBION</span>
+                <span onClick={handleTitleTap} className="select-none">LE CODEX D'ALBION</span>
                 <span className="hidden md:inline-block text-[11px] font-sans font-normal px-2 py-0.5 rounded bg-stone-800 text-amber-300 border border-amber-500/30">
                   Palier I : Le Seuil de Pierre
                 </span>
@@ -584,6 +685,7 @@ export default function App({
               sfx.playSteleUnlock();
               setActiveScreen('boss');
             }}
+            devMode={devMode}
           />
         )}
 
@@ -605,6 +707,10 @@ export default function App({
             onUnlockAll={unlockAllForTesting}
             onReset={resetProgress}
             onOpenDataModal={() => setShowDataModal(true)}
+            devMode={devMode}
+            lastExportAt={lastExportAt}
+            onResetClock={resetVirtualClock}
+            onDisableDev={disableDevMode}
           />
         )}
 
@@ -835,61 +941,116 @@ export default function App({
         </nav>
       )}
 
-      {/* MODAL EXPORT / IMPORT DE SAUVEGARDE JSON */}
+      {/* MODAL SAUVEGARDE : EXPORT / IMPORT PAR FICHIER */}
       {showDataModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-stone-900 border border-stone-700 rounded-2xl max-w-lg w-full p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-serif font-bold text-lg text-amber-200">
-                Archiver ou Restaurer mon Codex (IndexedDB & JSON)
-              </h3>
+          <div className="bg-stone-900 border border-stone-700 rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto p-5 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-serif font-bold text-lg text-amber-200">Sauvegarder / Restaurer</h3>
               <button
-                onClick={() => setShowDataModal(false)}
+                onClick={closeDataModal}
                 className="text-stone-400 hover:text-white text-sm cursor-pointer"
               >
                 Fermer
               </button>
             </div>
+
             <p className="text-xs text-stone-300">
-              Ta progression est enregistrée localement hors-ligne via IndexedDB (Dexie.js). Copie ce JSON pour exporter ton Codex ou colle une sauvegarde existante.
+              Ta progression est enregistrée dans ce navigateur. Pour la garder en sécurité ou la
+              passer d'un appareil à l'autre, télécharge un fichier de sauvegarde puis importe-le
+              ailleurs.
             </p>
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-stone-400 mb-1">
-                Sauvegarde actuelle :
-              </label>
-              <textarea
-                readOnly
-                value={JSON.stringify(saveState)}
-                className="w-full h-24 bg-stone-950 border border-stone-800 rounded-lg p-2 text-[11px] font-mono text-stone-300"
-              />
+
+            {/* Exporter */}
+            <div className="rounded-xl bg-stone-950 border border-stone-800 p-3 space-y-2">
+              <div className="text-xs uppercase tracking-wider text-stone-400">Exporter</div>
+              <div className="text-xs text-stone-300">
+                {(() => {
+                  const s = summarizeSave(saveState);
+                  return `${s.unlockedItems} éléments débloqués · ${s.completedNodes} étapes terminées`;
+                })()}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleExportFile}
+                  className="flex-1 min-w-[9rem] py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Télécharger le fichier</span>
+                </button>
+                <button
+                  onClick={handleCopyCode}
+                  className="flex-1 min-w-[9rem] py-2.5 rounded-lg bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-200 font-medium text-xs cursor-pointer"
+                >
+                  Copier le code
+                </button>
+              </div>
+              <div className="text-[11px] text-stone-400">
+                {lastExportAt
+                  ? `Dernier export : ${new Date(lastExportAt).toLocaleString('fr-FR')}`
+                  : 'Tu n\'as encore jamais exporté de sauvegarde.'}
+              </div>
             </div>
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-stone-400 mb-1">
-                Importer un Codex JSON :
+
+            {/* Importer */}
+            <div className="rounded-xl bg-stone-950 border border-stone-800 p-3 space-y-2">
+              <div className="text-xs uppercase tracking-wider text-stone-400">Importer</div>
+              <label className="block w-full py-2.5 rounded-lg bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-200 font-medium text-xs text-center cursor-pointer">
+                Choisir un fichier de sauvegarde
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={(e) => {
+                    handleImportFile(e.target.files?.[0]);
+                    e.target.value = '';
+                  }}
+                />
               </label>
+              <div className="text-[11px] text-stone-400">ou colle le code copié :</div>
               <textarea
                 value={importJsonText}
-                onChange={(e) => setImportJsonText(e.target.value)}
-                placeholder="Colle ici ton JSON de sauvegarde..."
-                className="w-full h-20 bg-stone-950 border border-stone-800 rounded-lg p-2 text-[11px] font-mono text-stone-200"
-              />
-              <button
-                onClick={() => {
-                  try {
-                    const parsed = JSON.parse(importJsonText);
-                    if (parsed && parsed.srsStates) {
-                      markIntentionalOverwrite();
-                      setSaveState({ ...createInitialSaveState(), ...parsed });
-                      setShowDataModal(false);
-                      sfx.playSuccessRune();
-                    }
-                  } catch {}
+                onChange={(e) => {
+                  setImportJsonText(e.target.value);
+                  if (e.target.value.trim()) previewImport(e.target.value);
+                  else {
+                    setImportPreview(null);
+                    setImportError('');
+                  }
                 }}
-                className="mt-2 w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs cursor-pointer"
-              >
-                Restaurer cette sauvegarde
-              </button>
+                placeholder="Colle ici ton code de sauvegarde..."
+                className="w-full h-16 bg-stone-900 border border-stone-800 rounded-lg p-2 text-[11px] font-mono text-stone-200"
+              />
+              {importError && (
+                <div className="text-xs text-rose-300 bg-rose-950/50 border border-rose-800/60 rounded-lg p-2">
+                  {importError}
+                </div>
+              )}
+              {importPreview && (
+                <div className="text-xs text-emerald-200 bg-emerald-950/40 border border-emerald-800/60 rounded-lg p-2 space-y-2">
+                  <div>
+                    Sauvegarde valide : {importPreview.summary.unlockedItems} éléments débloqués ·{' '}
+                    {importPreview.summary.completedNodes} étapes terminées
+                    {importPreview.summary.savedAt
+                      ? ` · enregistrée le ${new Date(importPreview.summary.savedAt).toLocaleString('fr-FR')}`
+                      : ''}
+                    .
+                  </div>
+                  <button
+                    onClick={confirmImport}
+                    className="w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs cursor-pointer"
+                  >
+                    Remplacer ma progression par cette sauvegarde
+                  </button>
+                </div>
+              )}
             </div>
+
+            {dataNotice && (
+              <div className="text-xs text-amber-200 bg-amber-950/40 border border-amber-800/50 rounded-lg p-2">
+                {dataNotice}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -906,7 +1067,8 @@ function LauncherScreen({
   onEnterCamp,
   onStartQuickLesson,
   onUnlockAllAndPlay,
-  onOpenBossDirect
+  onOpenBossDirect,
+  devMode
 }: {
   saveState: PlayerSaveState;
   srsDiagnostics: any;
@@ -914,6 +1076,7 @@ function LauncherScreen({
   onStartQuickLesson: () => void;
   onUnlockAllAndPlay: () => void;
   onOpenBossDirect: () => void;
+  devMode: boolean;
 }) {
   const hasProgress = srsDiagnostics.unlockedBricks.length > 0;
 
@@ -986,13 +1149,15 @@ function LauncherScreen({
             Accès Rapides & Vérification Audio
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <button
-              onClick={onUnlockAllAndPlay}
-              className="py-2.5 px-3 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-200 text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Unlock className="w-3.5 h-3.5" />
-              <span>Mode Test : Tout Débloquer</span>
-            </button>
+            {devMode && (
+              <button
+                onClick={onUnlockAllAndPlay}
+                className="py-2.5 px-3 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-200 text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Unlock className="w-3.5 h-3.5" />
+                <span>Mode Test : Tout Débloquer</span>
+              </button>
+            )}
             <button
               onClick={onOpenBossDirect}
               className="py-2.5 px-3 rounded-xl bg-purple-950/70 hover:bg-purple-900/80 border border-purple-500/40 text-purple-200 text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer"
@@ -1044,7 +1209,11 @@ function CampScreen({
   onSimulateTime,
   onUnlockAll,
   onReset,
-  onOpenDataModal
+  onOpenDataModal,
+  devMode,
+  lastExportAt,
+  onResetClock,
+  onDisableDev
 }: {
   saveState: PlayerSaveState;
   srsDiagnostics: any;
@@ -1056,7 +1225,13 @@ function CampScreen({
   onUnlockAll: () => void;
   onReset: () => void;
   onOpenDataModal: () => void;
+  devMode: boolean;
+  lastExportAt: number | null;
+  onResetClock: () => void;
+  onDisableDev: () => void;
 }) {
+  const hasProgressToSave = Object.values(saveState.srsStates).some((st) => st.unlocked);
+  const exportStale = !lastExportAt || Date.now() - lastExportAt > 7 * DAY_MS;
   const { unlockedBricks, unlockedFormulas, crackedItems, nextUncompletedNode } = srsDiagnostics;
 
   return (
@@ -1298,58 +1473,41 @@ function CampScreen({
         </div>
       </div>
 
-      {/* LABORATOIRE DE TEST & SIMULATION TEMPORELLE SRS */}
-      <div className="rounded-2xl bg-stone-900/70 border border-dashed border-stone-700 p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
-            <Sliders className="w-4 h-4" />
-            <span>Laboratoire de Test (Simulation Temporelle FSRS & Accès Direct)</span>
-          </div>
+      {/* MES DONNÉES : SAUVEGARDE ET RÉINITIALISATION */}
+      <div
+        className={`rounded-2xl border p-4 space-y-3 ${
+          hasProgressToSave && exportStale
+            ? 'bg-amber-950/30 border-amber-500/50'
+            : 'bg-stone-900/70 border-stone-800'
+        }`}
+      >
+        <div className="text-xs font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+          <Download className="w-4 h-4" />
+          <span>Mes données</span>
         </div>
-        <p className="text-xs text-stone-400">
-          Simule le passage des jours pour observer la fissuration progressive des briques (R(t) = 0,9<sup>t/S</sup>), débloque tout le Palier I en un clic ou teste directement le Boss Audio.
+        <p className="text-xs text-stone-300">
+          {hasProgressToSave && exportStale
+            ? lastExportAt
+              ? "Ta dernière sauvegarde a plus d'une semaine. Télécharge-en une nouvelle pour ne rien perdre."
+              : "Tu n'as pas encore sauvegardé ta progression dans un fichier. Fais-le maintenant : si ton navigateur efface ses données, tu pourras tout restaurer."
+            : 'Ta progression est enregistrée dans ce navigateur. Un fichier de sauvegarde te permet de la restaurer ou de la passer sur un autre appareil.'}
         </p>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={onUnlockAll}
-            className="px-3 py-1.5 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 text-emerald-200 border border-emerald-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
-          >
-            <Unlock className="w-3.5 h-3.5" />
-            <span>Tout débloquer (32 Briques & 3 Formules)</span>
-          </button>
-
-          <button
-            onClick={() => onSimulateTime(1)}
-            className="px-3 py-1.5 rounded-lg bg-amber-950/90 hover:bg-amber-900 text-amber-200 border border-amber-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
-          >
-            <FastForward className="w-3.5 h-3.5" />
-            <span>+24h (1 jour)</span>
-          </button>
-
-          <button
-            onClick={() => onSimulateTime(4)}
-            className="px-3 py-1.5 rounded-lg bg-amber-950/90 hover:bg-amber-900 text-amber-200 border border-amber-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
-          >
-            <FastForward className="w-3.5 h-3.5" />
-            <span>+4 jours (Éroder les briques)</span>
-          </button>
-
-          <button
-            onClick={onOpenBoss}
-            className="px-3 py-1.5 rounded-lg bg-purple-950/90 hover:bg-purple-900 text-purple-200 border border-purple-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
-          >
-            <Skull className="w-3.5 h-3.5" />
-            <span>Lancer le Boss Audio</span>
-          </button>
-
-          <button
             onClick={onOpenDataModal}
-            className="px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 border border-amber-400 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Sauvegarde JSON</span>
+            <span>Sauvegarder / Restaurer</span>
           </button>
-
+          {saveState.virtualDaysOffset > 0 && (
+            <button
+              onClick={onResetClock}
+              className="px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-medium cursor-pointer"
+            >
+              Remettre l'horloge à l'heure (+{saveState.virtualDaysOffset}j)
+            </button>
+          )}
           <button
             onClick={onReset}
             className="px-3 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-700/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
@@ -1359,6 +1517,60 @@ function CampScreen({
           </button>
         </div>
       </div>
+
+      {/* LABORATOIRE DE TEST (MODE DÉVELOPPEUR UNIQUEMENT) */}
+      {devMode && (
+        <div className="rounded-2xl bg-stone-900/70 border border-dashed border-stone-700 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+              <Sliders className="w-4 h-4" />
+              <span>Mode développeur : Simulation Temporelle FSRS</span>
+            </div>
+            <button
+              onClick={onDisableDev}
+              className="text-[11px] text-stone-400 hover:text-white underline cursor-pointer"
+            >
+              Désactiver
+            </button>
+          </div>
+          <p className="text-xs text-stone-400">
+            Simule le passage des jours pour observer la fissuration progressive des briques (R(t) = 0,9<sup>t/S</sup>), débloque tout le Palier I en un clic ou teste directement le Boss Audio. Ces actions modifient ta progression réelle.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={onUnlockAll}
+              className="px-3 py-1.5 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 text-emerald-200 border border-emerald-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+            >
+              <Unlock className="w-3.5 h-3.5" />
+              <span>Tout débloquer (32 Briques & 3 Formules)</span>
+            </button>
+
+            <button
+              onClick={() => onSimulateTime(1)}
+              className="px-3 py-1.5 rounded-lg bg-amber-950/90 hover:bg-amber-900 text-amber-200 border border-amber-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+            >
+              <FastForward className="w-3.5 h-3.5" />
+              <span>+24h (1 jour)</span>
+            </button>
+
+            <button
+              onClick={() => onSimulateTime(4)}
+              className="px-3 py-1.5 rounded-lg bg-amber-950/90 hover:bg-amber-900 text-amber-200 border border-amber-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+            >
+              <FastForward className="w-3.5 h-3.5" />
+              <span>+4 jours (Éroder les briques)</span>
+            </button>
+
+            <button
+              onClick={onOpenBoss}
+              className="px-3 py-1.5 rounded-lg bg-purple-950/90 hover:bg-purple-900 text-purple-200 border border-purple-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+            >
+              <Skull className="w-3.5 h-3.5" />
+              <span>Lancer le Boss Audio</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

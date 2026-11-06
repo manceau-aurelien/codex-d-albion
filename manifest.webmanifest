@@ -1,0 +1,17 @@
+{
+  "name": "Le Codex d'Albion — Apprentissage de l'Anglais",
+  "short_name": "Codex d'Albion",
+  "description": "Déchiffrez l'anglais brique par brique, découvrez les formules grammaticales par induction et affrontez le Gardien Audio.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0c0a09",
+  "background_color": "#0c0a09",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

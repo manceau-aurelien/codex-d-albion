@@ -8,3 +8,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>
 );
+
+// Mode hors-ligne / installation : le service worker n'est actif qu'en ligne (http/https) et en production.
+if ('serviceWorker' in navigator && location.protocol.startsWith('http') && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}

@@ -1,32 +1,18 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { VitePWA } from 'vite-plugin-pwa';
 
+// `index.html` à la racine est le fichier autonome généré (servi par GitHub Pages) :
+// le vrai point d'entrée Vite est donc `app.html`. Le build intermédiaire va dans `.build/`
+// puis `scripts/build-standalone.mjs` produit `index.html` et `sw.js` (hors-ligne).
 export default defineConfig({
   base: './',
-  // `index.html` à la racine est le fichier autonome généré (servi par GitHub Pages) :
-  // le vrai point d'entrée Vite est donc `app.html`.
+  publicDir: false,
   build: {
+    outDir: '.build',
+    emptyOutDir: true,
+    // Les polices (woff2) sont inlinées dans le CSS pour garder un fichier 100 % autonome
+    assetsInlineLimit: 100_000,
     rollupOptions: { input: 'app.html' }
   },
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['audio/tier1/**/*'],
-      manifest: {
-        name: "Le Codex d'Albion — Apprentissage de l'Anglais",
-        short_name: "Codex d'Albion",
-        description: "Déchiffrez l'anglais brique par brique, découvrez les formules grammaticales par induction et affrontez le Gardien Audio.",
-        theme_color: '#0c0a09',
-        background_color: '#0c0a09',
-        display: 'standalone',
-        orientation: 'portrait',
-        lang: 'fr'
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,json,opus,webm,mp3}']
-      }
-    })
-  ]
+  plugins: [react()]
 });

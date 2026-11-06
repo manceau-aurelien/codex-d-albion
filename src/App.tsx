@@ -62,6 +62,17 @@ import {
 } from './engine/srs';
 import { sfx, speakEnglish } from './engine/audio';
 import {
+  getNodeAccess,
+  getStrataProgress,
+  getBossLocks,
+  getObjective,
+  STRATA_META,
+  StrataProgress,
+  NodeAccess,
+  BossLock,
+  Objective
+} from './engine/progression';
+import {
   loadPlayerSave,
   persistPlayerSave,
   persistPlayerSaveSync,
@@ -205,6 +216,14 @@ type ScreenType =
   | 'free_engraving'
   | 'boss';
 
+interface Celebration {
+  id: string;
+  emoji: string;
+  title: string;
+  body: string;
+  cta: 'map' | 'boss';
+}
+
 export default function App({
   initialScreen = 'launcher',
   initialSaveState
@@ -255,6 +274,17 @@ export default function App({
   const resetVirtualClock = () => {
     setSaveState((prev) => ({ ...prev, virtualDaysOffset: 0 }));
   };
+
+  const [notice, setNotice] = useState('');
+  const noticeTimerRef = useRef<number | undefined>(undefined);
+  const notify = (message: string) => {
+    setNotice(message);
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => setNotice(''), 5000);
+  };
+  const [celebrations, setCelebrations] = useState<Celebration[]>([]);
+  // Mis à true avant une réinitialisation / un import / un déblocage test : pas de fête pour ces changements
+  const suppressCelebrationRef = useRef(false);
 
   const closeDataModal = () => {
     setShowDataModal(false);
@@ -310,6 +340,8 @@ export default function App({
       return;
     }
     markIntentionalOverwrite();
+    suppressCelebrationRef.current = true;
+    setCelebrations([]);
     setSaveState(importPreview.state);
     sfx.playSuccessRune();
     closeDataModal();
@@ -445,7 +477,18 @@ export default function App({
       saveState.completedNodeIds.includes(n.id)
     );
 
+    const nodeAccess = getNodeAccess(saveState.completedNodeIds);
+    const strata = getStrataProgress(saveState.completedNodeIds);
+    const bossLocks = getBossLocks(strata, crackedItems.length);
+    const bossUnlocked = bossLocks.every((l) => l.ok);
+    const objective = getObjective(saveState.completedNodeIds, strata, bossLocks, saveState.bossDefeated);
+
     return {
+      nodeAccess,
+      strata,
+      bossLocks,
+      bossUnlocked,
+      objective,
       unlockedBricks,
       unlockedFormulas,
       crackedItems,
@@ -456,7 +499,85 @@ export default function App({
       strate1CDone,
       allNodesCompleted: strate1ADone && strate1BDone && strate1CDone
     };
-  }, [saveState.srsStates, saveState.completedNodeIds, currentTimestamp]);
+  }, [saveState.srsStates, saveState.completedNodeIds, saveState.bossDefeated, currentTimestamp]);
+
+  // Entrée du Gardien : seulement quand les 4 verrous sont levés (ou déjà vaincu / mode développeur)
+  const openBoss = () => {
+    if (!srsDiagnostics.bossUnlocked && !saveState.bossDefeated && !devMode) {
+      sfx.playTorchExtinguish();
+      const missing = srsDiagnostics.bossLocks
+        .filter((l: BossLock) => !l.ok)
+        .map((l: BossLock) => l.hint.toLowerCase())
+        .join(', ');
+      notify(`La Porte du Gardien est scellée. Pour l'ouvrir : ${missing}.`);
+      if (activeScreen !== 'map') setActiveScreen('map');
+      return;
+    }
+    sfx.playSteleUnlock();
+    setActiveScreen('boss');
+  };
+
+  // Fêtes : une strate terminée ou la Porte du Gardien qui s'ouvre (jamais au chargement ni après un import)
+  const prevProgressRef = useRef<{ a: boolean; b: boolean; c: boolean; boss: boolean } | null>(null);
+  useEffect(() => {
+    if (!dbLoaded) return;
+    const strata: StrataProgress[] = srsDiagnostics.strata;
+    const cur = { a: strata[0].done, b: strata[1].done, c: strata[2].done, boss: srsDiagnostics.bossUnlocked as boolean };
+    const prev = prevProgressRef.current;
+    prevProgressRef.current = cur;
+    if (!prev) return;
+    if (suppressCelebrationRef.current) {
+      suppressCelebrationRef.current = false;
+      return;
+    }
+    const events: Celebration[] = [];
+    const strataDone = [
+      [cur.a && !prev.a, 0],
+      [cur.b && !prev.b, 1],
+      [cur.c && !prev.c, 2]
+    ] as Array<[boolean, number]>;
+    strataDone.forEach(([happened, i]) => {
+      if (!happened) return;
+      const done = strata[i];
+      const next = strata[i + 1];
+      if (next) {
+        events.push({
+          id: `strate-${done.id}-${Date.now()}`,
+          emoji: '🔓',
+          title: `Strate ${done.id} franchie !`,
+          body: `Un sceau se brise. La Strate ${next.id} « ${STRATA_META[next.id].short} » s'ouvre devant toi : ${next.brickCount} nouvelles briques${next.hasFormula ? ' et une nouvelle formule' : ''} t'attendent.`,
+          cta: 'map'
+        });
+      } else {
+        events.push({
+          id: `strate-${done.id}-${Date.now()}`,
+          emoji: '🏛️',
+          title: 'Les 3 Strates sont franchies !',
+          body: cur.boss
+            ? 'Le dernier verrou est levé : la Porte du Gardien du Seuil est ouverte. Es-tu prêt à briser les 10 Sceaux ?'
+            : "Plus qu'un verrou : restaure tes briques fissurées pour descendre la Porte du Gardien du Seuil.",
+          cta: cur.boss ? 'boss' : 'map'
+        });
+      }
+    });
+    if (cur.boss && !prev.boss && prev.c) {
+      events.push({
+        id: `boss-${Date.now()}`,
+        emoji: '💀',
+        title: 'Dernier verrou levé !',
+        body: 'Tes briques sont intactes : la Porte du Gardien du Seuil est ouverte. Es-tu prêt à briser les 10 Sceaux ?',
+        cta: 'boss'
+      });
+    }
+    if (events.length > 0) setCelebrations((q) => [...q, ...events]);
+  }, [dbLoaded, srsDiagnostics.strata, srsDiagnostics.bossUnlocked]);
+
+  // La fête s'affiche quand on est de retour sur le Campement ou la Carte (pas au milieu d'un exercice)
+  const currentCelebration =
+    activeScreen === 'camp' || activeScreen === 'map' ? celebrations[0] : undefined;
+  useEffect(() => {
+    if (currentCelebration) sfx.playSteleUnlock();
+  }, [currentCelebration?.id]);
 
   const applySRSUpdates = useCallback(
     (brickIds: string[] = [], formulaIds: string[] = [], isFirstTrySuccess = true) => {
@@ -474,6 +595,11 @@ export default function App({
   );
 
   const startMapNode = (node: MapNode) => {
+    if (srsDiagnostics.nodeAccess[node.id] === 'locked' && !devMode) {
+      sfx.playTorchExtinguish();
+      notify('Cette étape est encore scellée : termine la précédente pour la débloquer.');
+      return;
+    }
     sfx.playStoneClick(true);
     setActiveNode(node);
     if (node.type === 'gisement') {
@@ -515,7 +641,32 @@ export default function App({
     }));
   };
 
+  const completeNextNodeForTesting = () => {
+    const node = MAP_NODES.find((n) => !saveState.completedNodeIds.includes(n.id));
+    if (!node) return;
+    const now = currentTimestamp;
+    setSaveState((prev) => {
+      const nextSrs = { ...prev.srsStates };
+      [...(node.brickIds || []), ...(node.formulaId ? [node.formulaId] : [])].forEach((id) => {
+        const prevSt = nextSrs[id];
+        if (!prevSt) return;
+        const nextS = Math.max(1.0, prevSt.stability || 0.2);
+        nextSrs[id] = {
+          ...prevSt,
+          unlocked: true,
+          stability: nextS,
+          material: computeMaterial(nextS),
+          lastReviewedAt: now,
+          nextReviewAt: computeNextReviewTimestamp(now, nextS),
+          successCount: (prevSt.successCount || 0) + 1
+        };
+      });
+      return { ...prev, completedNodeIds: [...prev.completedNodeIds, node.id], srsStates: nextSrs };
+    });
+  };
+
   const unlockAllForTesting = () => {
+    suppressCelebrationRef.current = true;
     sfx.playSteleUnlock();
     const now = currentTimestamp;
     setSaveState((prev) => {
@@ -547,6 +698,8 @@ export default function App({
     );
     if (!ok) return;
     markIntentionalOverwrite();
+    suppressCelebrationRef.current = true;
+    setCelebrations([]);
     sfx.playTorchExtinguish();
     const fresh = createInitialSaveState(Date.now());
     setSaveState(fresh);
@@ -681,10 +834,7 @@ export default function App({
               unlockAllForTesting();
               setActiveScreen('camp');
             }}
-            onOpenBossDirect={() => {
-              sfx.playSteleUnlock();
-              setActiveScreen('boss');
-            }}
+            onOpenBossDirect={openBoss}
             devMode={devMode}
           />
         )}
@@ -699,12 +849,10 @@ export default function App({
               sfx.playStoneClick(true);
               setActiveScreen('free_engraving');
             }}
-            onOpenBoss={() => {
-              sfx.playSteleUnlock();
-              setActiveScreen('boss');
-            }}
+            onOpenBoss={openBoss}
             onSimulateTime={simulateTimeJump}
             onUnlockAll={unlockAllForTesting}
+            onCompleteNext={completeNextNodeForTesting}
             onReset={resetProgress}
             onOpenDataModal={() => setShowDataModal(true)}
             devMode={devMode}
@@ -719,10 +867,7 @@ export default function App({
             saveState={saveState}
             srsDiagnostics={srsDiagnostics}
             onStartNode={startMapNode}
-            onOpenBoss={() => {
-              sfx.playSteleUnlock();
-              setActiveScreen('boss');
-            }}
+            onOpenBoss={openBoss}
           />
         )}
 
@@ -928,17 +1073,64 @@ export default function App({
             </button>
 
             <button
-              onClick={() => {
-                sfx.playSteleUnlock();
-                setActiveScreen('boss');
-              }}
-              className="flex flex-col items-center justify-center py-1.5 rounded-xl text-amber-200 bg-gradient-to-b from-amber-950/70 to-stone-950 border border-amber-500/40 hover:border-amber-400 transition-all cursor-pointer"
+              onClick={openBoss}
+              className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all cursor-pointer border ${
+                srsDiagnostics.bossUnlocked || saveState.bossDefeated
+                  ? 'text-amber-200 bg-gradient-to-b from-amber-950/70 to-stone-950 border-amber-500/40 hover:border-amber-400'
+                  : 'text-stone-500 bg-stone-950 border-stone-800'
+              }`}
             >
-              <Skull className="w-5 h-5 text-amber-400" />
+              {srsDiagnostics.bossUnlocked || saveState.bossDefeated ? (
+                <Skull className="w-5 h-5 text-amber-400" />
+              ) : (
+                <Lock className="w-5 h-5" />
+              )}
               <span className="text-[11px] font-serif font-semibold mt-0.5">Gardien</span>
             </button>
           </div>
         </nav>
+      )}
+
+      {/* MESSAGE ÉPHÉMÈRE (étape ou Porte verrouillée) */}
+      {notice && (
+        <div className="fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 pointer-events-none">
+          <div className="max-w-md rounded-xl bg-stone-900 border border-amber-500/60 text-amber-100 text-xs px-4 py-3 shadow-xl flex items-start gap-2">
+            <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <span>{notice}</span>
+          </div>
+        </div>
+      )}
+
+      {/* CÉLÉBRATION : STRATE FRANCHIE / PORTE DU GARDIEN OUVERTE */}
+      {currentCelebration && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-gradient-to-b from-stone-900 via-stone-950 to-[#08080e] border-2 border-amber-400/70 p-6 text-center space-y-4 shadow-2xl animate-rune-glow">
+            <div className="text-5xl">{currentCelebration.emoji}</div>
+            <h3 className="font-serif font-extrabold text-xl text-amber-100">{currentCelebration.title}</h3>
+            <p className="text-sm text-stone-300 leading-relaxed">{currentCelebration.body}</p>
+            <div className="space-y-2 pt-1">
+              <button
+                onClick={() => {
+                  const cta = currentCelebration.cta;
+                  setCelebrations((q) => q.slice(1));
+                  if (cta === 'boss') openBoss();
+                  else setActiveScreen('map');
+                }}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-stone-950 font-serif font-bold text-sm cursor-pointer"
+              >
+                {currentCelebration.cta === 'boss' ? 'Affronter le Gardien' : "Continuer l'aventure"}
+              </button>
+              {currentCelebration.cta === 'boss' && (
+                <button
+                  onClick={() => setCelebrations((q) => q.slice(1))}
+                  className="w-full py-2 rounded-xl text-xs text-stone-400 hover:text-stone-200 cursor-pointer"
+                >
+                  Plus tard
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* MODAL SAUVEGARDE : EXPORT / IMPORT PAR FICHIER */}
@@ -1162,8 +1354,16 @@ function LauncherScreen({
               onClick={onOpenBossDirect}
               className="py-2.5 px-3 rounded-xl bg-purple-950/70 hover:bg-purple-900/80 border border-purple-500/40 text-purple-200 text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <Skull className="w-3.5 h-3.5" />
-              <span>Affronter le Boss Audio</span>
+              {srsDiagnostics.bossUnlocked || saveState.bossDefeated ? (
+                <Skull className="w-3.5 h-3.5" />
+              ) : (
+                <Lock className="w-3.5 h-3.5" />
+              )}
+              <span>
+                {srsDiagnostics.bossUnlocked || saveState.bossDefeated
+                  ? 'Affronter le Boss Audio'
+                  : 'Gardien du Seuil (scellé)'}
+              </span>
             </button>
           </div>
 
@@ -1208,6 +1408,7 @@ function CampScreen({
   onOpenBoss,
   onSimulateTime,
   onUnlockAll,
+  onCompleteNext,
   onReset,
   onOpenDataModal,
   devMode,
@@ -1223,6 +1424,7 @@ function CampScreen({
   onOpenBoss: () => void;
   onSimulateTime: (days: number) => void;
   onUnlockAll: () => void;
+  onCompleteNext: () => void;
   onReset: () => void;
   onOpenDataModal: () => void;
   devMode: boolean;
@@ -1292,6 +1494,8 @@ function CampScreen({
           </div>
         </div>
       </div>
+
+      <AdventurePath srsDiagnostics={srsDiagnostics} bossDefeated={saveState.bossDefeated} />
 
       {/* BOUTON D'ACTION DYNAMIQUE (BOUCLE DE SESSION COURTE 5 MINUTES) */}
       <div className="rounded-2xl bg-stone-900 border-2 border-amber-500/40 p-5 shadow-lg space-y-4">
@@ -1546,6 +1750,14 @@ function CampScreen({
             </button>
 
             <button
+              onClick={onCompleteNext}
+              className="px-3 py-1.5 rounded-lg bg-sky-950/90 hover:bg-sky-900 text-sky-200 border border-sky-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Terminer la prochaine étape</span>
+            </button>
+
+            <button
               onClick={() => onSimulateTime(1)}
               className="px-3 py-1.5 rounded-lg bg-amber-950/90 hover:bg-amber-900 text-amber-200 border border-amber-500/50 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
             >
@@ -1576,6 +1788,100 @@ function CampScreen({
 }
 
 // ============================================================================
+// CHEMIN DE L'AVENTURE (3 STRATES + GARDIEN) : progression, verrous et prochaine récompense
+// ============================================================================
+function AdventurePath({
+  srsDiagnostics,
+  bossDefeated
+}: {
+  srsDiagnostics: any;
+  bossDefeated: boolean;
+}) {
+  const strata: StrataProgress[] = srsDiagnostics.strata;
+  const objective: Objective = srsDiagnostics.objective;
+  const bossUnlocked: boolean = srsDiagnostics.bossUnlocked;
+
+  const steps: Array<{ key: string; label: string; state: 'done' | 'current' | 'locked'; sub: string; boss?: boolean }> = [
+    ...strata.map((s) => ({
+      key: s.id,
+      label: `Strate ${s.id}`,
+      state: s.state as 'done' | 'current' | 'locked',
+      sub: s.state === 'locked' ? 'Scellée' : s.done ? 'Terminée' : `${s.doneCount}/${s.total}`
+    })),
+    {
+      key: 'boss',
+      label: 'Gardien',
+      state: bossDefeated ? 'done' : bossUnlocked ? 'current' : 'locked',
+      sub: bossDefeated ? 'Vaincu' : bossUnlocked ? 'Ouvert !' : 'Scellé',
+      boss: true
+    }
+  ];
+
+  return (
+    <div className="rounded-2xl bg-stone-900/90 border border-amber-500/30 p-4 space-y-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+          <Compass className="w-4 h-4" />
+          <span>Chemin de l'aventure</span>
+        </div>
+        <span className="text-xs font-semibold text-amber-200">{objective.percent} %</span>
+      </div>
+
+      <div className="h-2 rounded-full bg-stone-950 overflow-hidden border border-stone-800">
+        <div
+          className="h-full bg-gradient-to-r from-amber-600 to-yellow-400 transition-all duration-700"
+          style={{ width: `${objective.percent}%` }}
+        />
+      </div>
+
+      <div className="flex items-start">
+        {steps.map((s, i) => (
+          <React.Fragment key={s.key}>
+            <div className="flex flex-col items-center text-center w-16 shrink-0">
+              <div
+                className={`w-10 h-10 rounded-full border-2 flex items-center justify-center ${
+                  s.state === 'done'
+                    ? 'bg-emerald-500/15 border-emerald-400 text-emerald-300'
+                    : s.state === 'current'
+                    ? 'bg-amber-500/20 border-amber-400 text-amber-300 animate-rune-glow'
+                    : 'bg-stone-950 border-stone-700 text-stone-500'
+                }`}
+              >
+                {s.state === 'done' ? (
+                  <CheckCircle2 className="w-5 h-5" />
+                ) : s.state === 'locked' ? (
+                  <Lock className="w-4 h-4" />
+                ) : s.boss ? (
+                  <Skull className="w-5 h-5" />
+                ) : (
+                  <span className="font-serif font-bold text-sm">{s.key}</span>
+                )}
+              </div>
+              <div className={`text-[11px] font-semibold mt-1 ${s.state === 'locked' ? 'text-stone-500' : 'text-stone-200'}`}>
+                {s.label}
+              </div>
+              <div className="text-[10px] text-stone-400">{s.sub}</div>
+            </div>
+            {i < steps.length - 1 && (
+              <div
+                className={`flex-1 h-0.5 mt-5 rounded ${
+                  steps[i].state === 'done' ? 'bg-emerald-500/60' : 'bg-stone-800'
+                }`}
+              />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+
+      <div className="rounded-xl bg-stone-950/80 border border-stone-800 p-3">
+        <div className="text-sm font-serif font-bold text-amber-100">{objective.headline}</div>
+        <div className="text-xs text-stone-300 mt-0.5">{objective.detail}</div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // ÉCRAN 2 : LA CARTE DU PALIER (3 STRATES + ARCHES DES 4 VERROUS DU GARDIEN)
 // ============================================================================
 function MapScreen({
@@ -1589,31 +1895,11 @@ function MapScreen({
   onStartNode: (node: MapNode) => void;
   onOpenBoss: () => void;
 }) {
-  const strata: Array<{ id: '1A' | '1B' | '1C'; name: string; desc: string }> = [
-    {
-      id: '1A',
-      name: 'Strate 1A : Les Objets du Seuil',
-      desc: "Récolter 10 briques (noms, adjectifs, articles) et débloquer la Formule I (L'Antéposition Immuable)."
-    },
-    {
-      id: '1B',
-      name: "Strate 1B : Les Êtres et l'État",
-      desc: "Récolter 11 briques (pronoms, être, négation) et débloquer la Formule II (Le Pilier d'État & la Neutralité 'it')."
-    },
-    {
-      id: '1C',
-      name: 'Strate 1C : Les Actions et les Illusions',
-      desc: 'Récolter 11 briques (verbes, faux-amis) et débloquer la Formule III (Le Sceau du Singulier -S).'
-    }
-  ];
-
-  const zeroCrackedOk = srsDiagnostics.crackedItems.length === 0;
-  const locks = [
-    { label: 'Strate 1A', unlocked: srsDiagnostics.strate1ADone },
-    { label: 'Strate 1B', unlocked: srsDiagnostics.strate1BDone },
-    { label: 'Strate 1C', unlocked: srsDiagnostics.strate1CDone },
-    { label: 'Zéro brique fissurée', unlocked: zeroCrackedOk }
-  ];
+  const strata: StrataProgress[] = srsDiagnostics.strata;
+  const nodeAccess: Record<string, NodeAccess> = srsDiagnostics.nodeAccess;
+  const bossLocks: BossLock[] = srsDiagnostics.bossLocks;
+  const bossUnlocked: boolean = srsDiagnostics.bossUnlocked;
+  const missingLocks = bossLocks.filter((l) => !l.ok);
 
   return (
     <div className="space-y-6">
@@ -1622,52 +1908,89 @@ function MapScreen({
           Carte Verticale du Palier I : Le Seuil de Pierre
         </h2>
         <p className="text-xs sm:text-sm text-stone-400">
-          Progresse de Gisement (◇) en Stèle (⬢) à travers les 3 Strates pour déverrouiller l'Arche du Gardien.
+          Chaque étape ouvre la suivante : termine une Strate pour franchir le seuil de la prochaine, puis affronte le Gardien.
         </p>
       </div>
 
-      {strata.map((st) => {
-        const nodes = MAP_NODES.filter((n) => n.subtierId === st.id);
+      <AdventurePath srsDiagnostics={srsDiagnostics} bossDefeated={saveState.bossDefeated} />
+
+      {strata.map((sp, sIdx) => {
+        const previous = sIdx > 0 ? strata[sIdx - 1] : null;
+        const meta = STRATA_META[sp.id];
+        const sealed = sp.state === 'locked';
+
         return (
           <div
-            key={st.id}
-            className="rounded-2xl bg-stone-900/90 border border-stone-800 p-4 sm:p-5 space-y-4"
+            key={sp.id}
+            className={`rounded-2xl border p-4 sm:p-5 space-y-4 transition-colors ${
+              sealed
+                ? 'bg-stone-950/70 border-stone-800/80'
+                : sp.state === 'current'
+                ? 'bg-stone-900/90 border-amber-500/40'
+                : 'bg-stone-900/90 border-emerald-500/30'
+            }`}
           >
-            <div className="border-b border-stone-800 pb-3">
-              <h3 className="font-serif font-bold text-base sm:text-lg text-amber-200">
-                {st.name}
-              </h3>
-              <p className="text-xs text-stone-400 mt-0.5">{st.desc}</p>
+            <div className="border-b border-stone-800 pb-3 flex items-start justify-between gap-3">
+              <div>
+                <h3
+                  className={`font-serif font-bold text-base sm:text-lg flex items-center gap-2 ${
+                    sealed ? 'text-stone-500' : 'text-amber-200'
+                  }`}
+                >
+                  {sealed && <Lock className="w-4 h-4 shrink-0" />}
+                  <span>{meta.name}</span>
+                </h3>
+                <p className="text-xs text-stone-400 mt-0.5">
+                  {sealed
+                    ? `Scellée. Termine la Strate ${previous?.id} pour franchir ce seuil : ${sp.brickCount} nouvelles briques${
+                        sp.hasFormula ? ' et 1 formule' : ''
+                      } t'y attendent.`
+                    : `${sp.brickCount} briques${sp.hasFormula ? ' et 1 formule' : ''} • ${sp.doneCount}/${sp.total} étapes terminées`}
+                </p>
+              </div>
+              {sp.done && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-600/40 shrink-0">
+                  Terminée
+                </span>
+              )}
             </div>
 
             <div className="space-y-3">
-              {nodes.map((node) => {
-                const isCompleted = saveState.completedNodeIds.includes(node.id);
+              {sp.nodes.map((node) => {
+                const access = nodeAccess[node.id];
+                const isCompleted = access === 'completed';
+                const isLocked = access === 'locked';
+                const isNext = access === 'available';
                 const isStele = node.type === 'stele';
 
                 return (
                   <div
                     key={node.id}
                     className={`rounded-xl p-3.5 border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                      isCompleted
+                      isLocked
+                        ? 'bg-stone-950/60 border-stone-800/70 opacity-70'
+                        : isCompleted
                         ? 'bg-stone-950/80 border-emerald-500/40'
-                        : isStele
-                        ? 'bg-gradient-to-r from-stone-950 to-amber-950/30 border-amber-500/50'
+                        : isNext
+                        ? 'bg-gradient-to-r from-stone-950 to-amber-950/30 border-amber-400/70 shadow-lg shadow-amber-950/30'
                         : 'bg-stone-950 border-stone-800'
                     }`}
                   >
                     <div className="flex items-start gap-3">
                       <div
                         className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border font-serif font-bold ${
-                          isCompleted
+                          isLocked
+                            ? 'bg-stone-900 border-stone-700 text-stone-500'
+                            : isCompleted
                             ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
                             : isStele
                             ? 'bg-amber-500/15 border-amber-500/50 text-amber-300'
                             : 'bg-sky-500/15 border-sky-500/40 text-sky-300'
                         }`}
-                        title={isStele ? 'Nœud Stèle (Hexagone)' : 'Nœud Gisement (Losange)'}
                       >
-                        {isCompleted ? (
+                        {isLocked ? (
+                          <Lock className="w-4 h-4" />
+                        ) : isCompleted ? (
                           <CheckCircle2 className="w-5 h-5" />
                         ) : isStele ? (
                           <span className="text-lg">⬢</span>
@@ -1676,30 +1999,57 @@ function MapScreen({
                         )}
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-serif font-bold text-sm sm:text-base text-stone-100">
-                            {node.title}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`font-serif font-bold text-sm sm:text-base ${
+                              isLocked ? 'text-stone-500' : 'text-stone-100'
+                            }`}
+                          >
+                            {isLocked && sealed ? (isStele ? 'Stèle scellée' : 'Gisement scellé') : node.title}
                           </span>
                           {isCompleted && (
                             <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-600/40">
                               Maîtrisé
                             </span>
                           )}
+                          {isNext && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-stone-950 font-bold">
+                              Prochaine étape
+                            </span>
+                          )}
                         </div>
-                        <p className="text-xs text-stone-400 mt-0.5">{node.subtitle}</p>
+                        <p className="text-xs text-stone-400 mt-0.5">
+                          {isLocked
+                            ? sealed
+                              ? 'Contenu caché jusqu’à la levée du sceau.'
+                              : 'Termine l’étape précédente pour la révéler.'
+                            : node.subtitle}
+                        </p>
                       </div>
                     </div>
 
                     <button
                       onClick={() => onStartNode(node)}
-                      className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0 cursor-pointer transition-all ${
-                        isCompleted
-                          ? 'bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700'
-                          : 'bg-amber-500 hover:bg-amber-400 text-stone-950 shadow-md'
+                      disabled={isLocked}
+                      className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0 transition-all ${
+                        isLocked
+                          ? 'bg-stone-900 text-stone-500 border border-stone-800 cursor-not-allowed'
+                          : isCompleted
+                          ? 'bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 cursor-pointer'
+                          : 'bg-amber-500 hover:bg-amber-400 text-stone-950 shadow-md cursor-pointer'
                       }`}
                     >
-                      <span>{isCompleted ? 'Réviser' : 'Explorer'}</span>
-                      <ChevronRight className="w-4 h-4" />
+                      {isLocked ? (
+                        <>
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Verrouillé</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>{isCompleted ? 'Réviser' : 'Explorer'}</span>
+                          <ChevronRight className="w-4 h-4" />
+                        </>
+                      )}
                     </button>
                   </div>
                 );
@@ -1710,15 +2060,25 @@ function MapScreen({
       })}
 
       {/* NŒUD PORTE DU GARDIEN (ARCHE AUX 4 VERROUS) */}
-      <div className="rounded-2xl bg-gradient-to-br from-[#08080f] via-stone-950 to-amber-950/40 border-2 border-amber-500/60 p-5 shadow-2xl space-y-4">
+      <div
+        className={`rounded-2xl border-2 p-5 shadow-2xl space-y-4 bg-gradient-to-br from-[#08080f] via-stone-950 to-amber-950/40 ${
+          bossUnlocked ? 'border-amber-400' : 'border-stone-700/80'
+        }`}
+      >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-400 flex items-center justify-center text-amber-300 shrink-0">
-              <Skull className="w-7 h-7" />
+            <div
+              className={`w-12 h-12 rounded-2xl border flex items-center justify-center shrink-0 ${
+                bossUnlocked
+                  ? 'bg-amber-500/20 border-amber-400 text-amber-300 animate-rune-glow'
+                  : 'bg-stone-900 border-stone-700 text-stone-500'
+              }`}
+            >
+              {bossUnlocked ? <Skull className="w-7 h-7" /> : <Lock className="w-6 h-6" />}
             </div>
             <div>
               <div className="text-xs uppercase tracking-widest text-amber-400 font-bold">
-                Arche Scellée • Boss de Compréhension Audio
+                {bossUnlocked ? 'Arche Ouverte' : 'Arche Scellée'} • Boss de Compréhension Audio
               </div>
               <h3 className="text-xl font-serif font-bold text-amber-50">
                 La Porte du Gardien du Seuil
@@ -1731,24 +2091,28 @@ function MapScreen({
 
           <button
             onClick={onOpenBoss}
-            className="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-stone-950 font-serif font-bold text-sm shrink-0 shadow-lg cursor-pointer"
+            className={`px-5 py-3 rounded-xl font-serif font-bold text-sm shrink-0 shadow-lg ${
+              bossUnlocked
+                ? 'bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-stone-950 cursor-pointer'
+                : 'bg-stone-900 text-stone-400 border border-stone-700 cursor-pointer'
+            }`}
           >
-            Affronter le Gardien
+            {bossUnlocked ? 'Affronter le Gardien' : 'Voir les verrous'}
           </button>
         </div>
 
         {/* Les 4 Verrous de la Porte */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-stone-800/80">
-          {locks.map((l, idx) => (
+          {bossLocks.map((l, idx) => (
             <div
               key={idx}
               className={`p-2.5 rounded-xl border text-xs flex items-center gap-2 ${
-                l.unlocked
+                l.ok
                   ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
                   : 'bg-stone-900/90 border-stone-800 text-stone-400'
               }`}
             >
-              {l.unlocked ? (
+              {l.ok ? (
                 <Unlock className="w-4 h-4 text-emerald-400 shrink-0" />
               ) : (
                 <Lock className="w-4 h-4 text-amber-500/70 shrink-0" />
@@ -1757,6 +2121,34 @@ function MapScreen({
             </div>
           ))}
         </div>
+        {!bossUnlocked && missingLocks.length > 0 && (
+          <p className="text-xs text-stone-400">
+            Pour ouvrir la Porte : {missingLocks.map((m) => m.hint.toLowerCase()).join(', ')}.
+          </p>
+        )}
+      </div>
+
+      {/* PALIERS SUIVANTS : APERÇU VERROUILLÉ */}
+      <div className="space-y-2">
+        <div className="text-xs uppercase tracking-wider text-stone-500 font-semibold">Au-delà du Seuil</div>
+        {['II', 'III'].map((n) => (
+          <div
+            key={n}
+            className="rounded-xl bg-stone-950/60 border border-dashed border-stone-800 p-3.5 flex items-center gap-3 opacity-70"
+          >
+            <div className="w-10 h-10 rounded-xl bg-stone-900 border border-stone-700 text-stone-500 flex items-center justify-center shrink-0">
+              <Lock className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="font-serif font-bold text-sm text-stone-400">Palier {n} : ???</div>
+              <div className="text-xs text-stone-500">
+                {saveState.bossDefeated && n === 'II'
+                  ? 'Le Seuil est franchi. Ce territoire est encore en cours d’exploration (bientôt disponible).'
+                  : 'Se déverrouille après avoir vaincu le Gardien du Seuil.'}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1819,7 +2211,7 @@ function GrimoireScreen({
 
       {tab === 'bricks' ? (
         <div className="space-y-5">
-          {selectedBrick && (
+          {selectedBrick && saveState.srsStates[selectedBrick.id]?.unlocked && (
             <div className="rounded-2xl bg-stone-900 border-2 border-amber-500/40 p-4 sm:p-5 shadow-xl space-y-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
@@ -1951,6 +2343,18 @@ function GrimoireScreen({
             </div>
           )}
 
+          {selectedBrick && !saveState.srsStates[selectedBrick.id]?.unlocked && (
+            <div className="rounded-2xl bg-stone-900/60 border-2 border-dashed border-stone-700 p-5 text-center space-y-2">
+              <div className="mx-auto w-14 h-14 rounded-2xl bg-stone-950 border border-stone-700 flex items-center justify-center text-stone-500">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div className="font-serif font-bold text-stone-300">Brique non découverte</div>
+              <p className="text-xs text-stone-400">
+                Elle se cache dans la Strate {selectedBrick.subtierId}. Progresse sur la Carte pour la récolter et révéler son sens, sa prononciation et son astuce.
+              </p>
+            </div>
+          )}
+
           {/* Filtre par Strate */}
           <div className="flex items-center gap-2">
             {(['ALL', '1A', '1B', '1C'] as const).map((st) => (
@@ -1975,6 +2379,22 @@ function GrimoireScreen({
               const R = calculateRetention(st, currentTimestamp);
               const isCracked = Boolean(st?.unlocked && R < 0.85);
               const isCritical = Boolean(st?.unlocked && R < 0.65);
+
+              if (!st?.unlocked) {
+                return (
+                  <div
+                    key={brick.id}
+                    onClick={() => setSelectedBrick(brick)}
+                    className="p-2.5 rounded-xl border border-dashed border-stone-800 bg-stone-950/60 flex flex-col items-center text-center cursor-pointer hover:border-stone-700"
+                  >
+                    <div className="px-3 py-1.5 rounded-lg bg-stone-900 border border-stone-800 text-stone-600 font-serif font-bold text-sm tracking-widest">
+                      ? ? ?
+                    </div>
+                    <div className="text-xs font-medium text-stone-600 mt-2">Non découverte</div>
+                    <div className="text-[10px] text-stone-700">Strate {brick.subtierId}</div>
+                  </div>
+                );
+              }
 
               return (
                 <div
@@ -2012,6 +2432,27 @@ function GrimoireScreen({
         <div className="space-y-4">
           {TIER1_FORMULAS.map((form) => {
             const st = saveState.srsStates[form.id];
+            if (!st?.unlocked) {
+              return (
+                <div
+                  key={form.id}
+                  className="rounded-2xl bg-stone-950/60 border border-dashed border-stone-800 p-5 flex items-center gap-3"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-stone-900 border border-stone-700 text-stone-500 flex items-center justify-center shrink-0">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+                      Strate {form.subtierId}
+                    </div>
+                    <div className="font-serif font-bold text-stone-400">Formule scellée</div>
+                    <div className="text-xs text-stone-500">
+                      Déchiffre-la en franchissant la Stèle de la Strate {form.subtierId} sur la Carte.
+                    </div>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div
                 key={form.id}

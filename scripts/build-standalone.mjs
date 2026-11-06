@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const distDir = path.resolve('codex_albion/dist/assets');
+const distDir = path.resolve('dist/assets');
 const files = fs.readdirSync(distDir);
 const cssFile = files.find((f) => f.endsWith('.css'));
 const jsFile = files.find((f) => f.endsWith('.js'));
@@ -29,9 +29,8 @@ const html = `<!DOCTYPE html>
 </html>`;
 
 const targets = [
-  path.resolve('Le_Codex_d_Albion.html'),
-  path.resolve('codex_albion/index.html'),
-  path.resolve('codex_albion/dist/index.html')
+  path.resolve('index.html'),
+  path.resolve('dist/index.html')
 ];
 
 for (const target of targets) {

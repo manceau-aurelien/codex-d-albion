@@ -4,6 +4,11 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   base: './',
+  // `index.html` à la racine est le fichier autonome généré (servi par GitHub Pages) :
+  // le vrai point d'entrée Vite est donc `app.html`.
+  build: {
+    rollupOptions: { input: 'app.html' }
+  },
   plugins: [
     react(),
     VitePWA({

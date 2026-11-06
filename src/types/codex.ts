@@ -138,6 +138,7 @@ export interface PlayerSaveState {
   preferredAccent: 'uk' | 'us';
   virtualDaysOffset: number;
   srsStates: Record<string, SRSItemState>;
+  savedAt?: number;             // Horodatage du dernier enregistrement (ms)
 }
 
 export interface MapNode {

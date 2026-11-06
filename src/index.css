@@ -2,6 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Anti-décalage horizontal sur mobile : la page ne doit jamais pouvoir glisser vers la droite.
+   `html` en hidden (propagé au viewport) + `clip` ailleurs pour ne pas casser le header sticky. */
+html {
+  overflow-x: hidden;
+  max-width: 100%;
+  overscroll-behavior-x: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+  overflow-wrap: anywhere;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+img, svg, video, canvas, textarea, input {
+  max-width: 100%;
+}
+
 @keyframes shakeError {
   0%, 100% { transform: translateX(0); }
   20% { transform: translateX(-8px); }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Compass,
   Map as MapIcon,
@@ -61,7 +61,12 @@ import {
   computeNextReviewTimestamp
 } from './engine/srs';
 import { sfx, speakEnglish } from './engine/audio';
-import { loadPlayerSave, persistPlayerSave } from './db/codexDb';
+import {
+  loadPlayerSave,
+  persistPlayerSave,
+  persistPlayerSaveSync,
+  markIntentionalOverwrite
+} from './db/codexDb';
 
 // ============================================================================
 // COMPOSANT BRIQUE DE PIERRE (<BrickChip />)
@@ -218,11 +223,30 @@ export default function App({
   }, []);
 
   // Persistance automatique dans IndexedDB + localStorage
+  const latestSaveRef = useRef(saveState);
+  latestSaveRef.current = saveState;
   useEffect(() => {
     if (dbLoaded) {
       persistPlayerSave(saveState);
     }
   }, [saveState, dbLoaded]);
+
+  // Sur mobile, l'onglet peut être tué dès qu'on quitte l'app : on force une écriture synchrone avant.
+  useEffect(() => {
+    if (!dbLoaded) return;
+    const flush = () => {
+      persistPlayerSaveSync(latestSaveRef.current);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [dbLoaded]);
 
   // Horloge virtuelle (permet d'avancer le temps pour tester le SRS)
   const currentTimestamp = useMemo(() => {
@@ -417,6 +441,11 @@ export default function App({
   };
 
   const resetProgress = () => {
+    const ok = window.confirm(
+      'Réinitialiser le Codex ?\n\nToute ta progression sera définitivement effacée. Cette action est irréversible.'
+    );
+    if (!ok) return;
+    markIntentionalOverwrite();
     sfx.playTorchExtinguish();
     const fresh = createInitialSaveState(Date.now());
     setSaveState(fresh);
@@ -434,7 +463,7 @@ export default function App({
 
   return (
     <div
-      className={`min-h-screen flex flex-col font-sans selection:bg-amber-500/30 transition-colors duration-500 ${
+      className={`min-h-screen min-h-dvh w-full max-w-full overflow-x-clip flex flex-col font-sans selection:bg-amber-500/30 transition-colors duration-500 ${
         isBossTheme ? 'bg-[#050508] text-amber-50' : 'bg-stone-950 text-stone-100'
       }`}
     >
@@ -849,7 +878,8 @@ export default function App({
                   try {
                     const parsed = JSON.parse(importJsonText);
                     if (parsed && parsed.srsStates) {
-                      setSaveState(parsed);
+                      markIntentionalOverwrite();
+                      setSaveState({ ...createInitialSaveState(), ...parsed });
                       setShowDataModal(false);
                       sfx.playSuccessRune();
                     }

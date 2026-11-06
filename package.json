@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/build-standalone.mjs",
     "preview": "vite preview",
     "test:srs": "node scripts/test-srs.mjs",
     "generate:tts": "node scripts/generate-tts.mjs"

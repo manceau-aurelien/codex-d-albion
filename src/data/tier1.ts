@@ -1394,7 +1394,7 @@ export const MAP_NODES: MapNode[] = [
     id: 'node_1a_g1',
     subtierId: '1A',
     type: 'gisement',
-    title: 'Gisement 1A-I : Les Pierres du Seuil',
+    title: 'Le Filon du Seuil',
     subtitle: '5 Briques : the, a/an, door, key, stone',
     brickIds: ['b_the', 'b_a', 'b_door', 'b_key', 'b_stone']
   },
@@ -1402,7 +1402,7 @@ export const MAP_NODES: MapNode[] = [
     id: 'node_1a_g2',
     subtierId: '1A',
     type: 'gisement',
-    title: 'Gisement 1A-II : Les Qualités Anciennes',
+    title: 'La Veine des Anciens',
     subtitle: '5 Briques : guard, old, big, small, cold',
     brickIds: ['b_guard', 'b_old', 'b_big', 'b_small', 'b_cold']
   },
@@ -1410,8 +1410,8 @@ export const MAP_NODES: MapNode[] = [
     id: 'node_1a_stele',
     subtierId: '1A',
     type: 'stele',
-    title: "Stèle I : L'Antéposition Immuable",
-    subtitle: 'Débloquer la Formule I par induction + 6 Épreuves de gravure',
+    title: "La Stèle de l'Ordre Immuable",
+    subtitle: 'Déchiffre la Formule I par induction + 6 Épreuves de gravure',
     formulaId: 'f_1a',
     exerciseIds: ['ex_1a_1', 'ex_1a_2', 'ex_1a_3', 'ex_1a_4', 'ex_1a_5', 'ex_1a_6']
   },
@@ -1419,7 +1419,7 @@ export const MAP_NODES: MapNode[] = [
     id: 'node_1b_g1',
     subtierId: '1B',
     type: 'gisement',
-    title: 'Gisement 1B-I : Les Âmes et les Choses',
+    title: 'Le Murmure des Âmes',
     subtitle: '6 Briques : I, you, he, she, it, they',
     brickIds: ['b_i', 'b_you', 'b_he', 'b_she', 'b_it', 'b_they']
   },
@@ -1427,7 +1427,7 @@ export const MAP_NODES: MapNode[] = [
     id: 'node_1b_g2',
     subtierId: '1B',
     type: 'gisement',
-    title: "Gisement 1B-II : Le Souffle de l'Être",
+    title: "Le Souffle de l'Être",
     subtitle: '5 Briques : am, is, are, not, here',
     brickIds: ['b_am', 'b_is', 'b_are', 'b_not', 'b_here']
   },
@@ -1435,8 +1435,8 @@ export const MAP_NODES: MapNode[] = [
     id: 'node_1b_stele',
     subtierId: '1B',
     type: 'stele',
-    title: "Stèle II : Le Pilier d'État & La Neutralité",
-    subtitle: 'Débloquer la Formule II par induction + 6 Épreuves de gravure',
+    title: 'La Stèle du Pilier',
+    subtitle: 'Déchiffre la Formule II par induction + 6 Épreuves de gravure',
     formulaId: 'f_1b',
     exerciseIds: ['ex_1b_1', 'ex_1b_2', 'ex_1b_3', 'ex_1b_4', 'ex_1b_5', 'ex_1b_6']
   },
@@ -1444,7 +1444,7 @@ export const MAP_NODES: MapNode[] = [
     id: 'node_1c_g1',
     subtierId: '1C',
     type: 'gisement',
-    title: 'Gisement 1C-I : Les Gestes du Gardien',
+    title: 'Les Gestes du Gardien',
     subtitle: '6 Briques : see, open, keep, wait, have/has, afraid',
     brickIds: ['b_see', 'b_open', 'b_keep', 'b_wait', 'b_have', 'b_afraid']
   },
@@ -1452,7 +1452,7 @@ export const MAP_NODES: MapNode[] = [
     id: 'node_1c_g2',
     subtierId: '1C',
     type: 'gisement',
-    title: "Gisement 1C-II : Les Ombres et l'Illusion",
+    title: 'Le Labyrinthe des Ombres',
     subtitle: '5 Briques : shadow, way, actually, one, three',
     brickIds: ['b_shadow', 'b_way', 'b_actually', 'b_one', 'b_three']
   },
@@ -1460,8 +1460,8 @@ export const MAP_NODES: MapNode[] = [
     id: 'node_1c_stele',
     subtierId: '1C',
     type: 'stele',
-    title: 'Stèle III : Le Sceau du Singulier (-S)',
-    subtitle: 'Débloquer la Formule III par induction + 6 Épreuves de gravure',
+    title: 'La Stèle du Sceau Singulier',
+    subtitle: 'Déchiffre la Formule III par induction + 6 Épreuves de gravure',
     formulaId: 'f_1c',
     exerciseIds: ['ex_1c_1', 'ex_1c_2', 'ex_1c_3', 'ex_1c_4', 'ex_1c_5', 'ex_1c_6']
   }

@@ -12,10 +12,45 @@ export type StrataState = 'done' | 'current' | 'locked';
 
 export const STRATA_IDS: StrataId[] = ['1A', '1B', '1C'];
 
-export const STRATA_META: Record<StrataId, { name: string; short: string }> = {
-  '1A': { name: 'Strate 1A : Les Objets du Seuil', short: 'Les Objets du Seuil' },
-  '1B': { name: "Strate 1B : Les Êtres et l'État", short: "Les Êtres et l'État" },
-  '1C': { name: 'Strate 1C : Les Actions et les Illusions', short: 'Les Actions et les Illusions' }
+// Les identifiants 1A/1B/1C restent internes ; le joueur ne voit que ces noms.
+export interface StrataMeta {
+  name: string; // « Le Parvis des Pierres »
+  short: string; // « Le Parvis »
+  the: string; // « le Parvis des Pierres » (en milieu de phrase)
+  ofShort: string; // « du Parvis »
+  numeral: string; // « I »
+  clearedTitle: string; // titre de la fête
+  place: string; // décor, pour les textes d'ambiance
+}
+
+export const STRATA_META: Record<StrataId, StrataMeta> = {
+  '1A': {
+    name: 'Le Parvis des Pierres',
+    short: 'Le Parvis',
+    the: 'le Parvis des Pierres',
+    ofShort: 'du Parvis',
+    numeral: 'I',
+    clearedTitle: 'Le Parvis est franchi !',
+    place: 'Portes, clés et gardiens de pierre : le seuil de la tour.'
+  },
+  '1B': {
+    name: 'Le Cloître des Âmes',
+    short: 'Le Cloître',
+    the: 'le Cloître des Âmes',
+    ofShort: 'du Cloître',
+    numeral: 'II',
+    clearedTitle: 'Le Cloître est franchi !',
+    place: 'Les voix qui hantent la tour : qui es-tu, qui est là ?'
+  },
+  '1C': {
+    name: 'Les Cryptes des Ombres',
+    short: 'Les Cryptes',
+    the: 'les Cryptes des Ombres',
+    ofShort: 'des Cryptes',
+    numeral: 'III',
+    clearedTitle: 'Les Cryptes sont franchies !',
+    place: 'Gestes, ombres et illusions : là où les faux-amis se cachent.'
+  }
 };
 
 export interface StrataProgress {
@@ -81,14 +116,14 @@ export function getStrataProgress(completedNodeIds: string[]): StrataProgress[] 
 /** Les 4 verrous de la Porte du Gardien : 3 strates terminées + aucune brique fissurée. */
 export function getBossLocks(strata: StrataProgress[], crackedCount: number): BossLock[] {
   const locks: BossLock[] = strata.map((s) => ({
-    label: `Strate ${s.id}`,
+    label: STRATA_META[s.id].short,
     ok: s.done,
-    hint: `Termine la Strate ${s.id}`
+    hint: `traverse ${STRATA_META[s.id].the}`
   }));
   locks.push({
-    label: 'Zéro brique fissurée',
+    label: 'Pierres intactes',
     ok: crackedCount === 0,
-    hint: `Restaure tes ${crackedCount} brique${crackedCount > 1 ? 's' : ''} fissurée${crackedCount > 1 ? 's' : ''}`
+    hint: `restaure tes ${crackedCount} brique${crackedCount > 1 ? 's' : ''} fissurée${crackedCount > 1 ? 's' : ''}`
   });
   return locks;
 }
@@ -115,7 +150,7 @@ export function getObjective(
     const remaining = current.total - current.doneCount;
     const next = strata[strata.indexOf(current) + 1];
     const reward = next
-      ? `Récompense : la Strate ${next.id} « ${STRATA_META[next.id].short} » (${next.brickCount} nouvelles briques${
+      ? `Récompense : ${STRATA_META[next.id].name} (${next.brickCount} nouvelles briques${
           next.hasFormula ? ' + 1 formule' : ''
         }).`
       : 'Récompense : la Porte du Gardien du Seuil.';
@@ -123,8 +158,8 @@ export function getObjective(
       percent,
       headline:
         remaining === 1
-          ? `Dernière étape de la Strate ${current.id} !`
-          : `Strate ${current.id} : encore ${remaining} étapes`,
+          ? `Dernière étape ${STRATA_META[current.id].ofShort} !`
+          : `${STRATA_META[current.id].name} : encore ${remaining} étapes`,
       detail: reward
     };
   }
@@ -132,7 +167,12 @@ export function getObjective(
   if (!bossDefeated) {
     const missing = bossLocks.filter((l) => !l.ok);
     if (missing.length > 0) {
-      return { percent, headline: 'Un dernier verrou protège le Gardien', detail: missing.map((m) => m.hint).join(' · ') };
+      const todo = missing.map((m) => m.hint).join(', ');
+      return {
+        percent,
+        headline: 'Un dernier verrou protège le Gardien',
+        detail: todo.charAt(0).toUpperCase() + todo.slice(1) + '.'
+      };
     }
     return {
       percent,

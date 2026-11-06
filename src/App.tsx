@@ -67,6 +67,7 @@ import {
   getBossLocks,
   getObjective,
   STRATA_META,
+  StrataId,
   StrataProgress,
   NodeAccess,
   BossLock,
@@ -507,7 +508,7 @@ export default function App({
       sfx.playTorchExtinguish();
       const missing = srsDiagnostics.bossLocks
         .filter((l: BossLock) => !l.ok)
-        .map((l: BossLock) => l.hint.toLowerCase())
+        .map((l: BossLock) => l.hint)
         .join(', ');
       notify(`La Porte du Gardien est scellée. Pour l'ouvrir : ${missing}.`);
       if (activeScreen !== 'map') setActiveScreen('map');
@@ -544,18 +545,18 @@ export default function App({
         events.push({
           id: `strate-${done.id}-${Date.now()}`,
           emoji: '🔓',
-          title: `Strate ${done.id} franchie !`,
-          body: `Un sceau se brise. La Strate ${next.id} « ${STRATA_META[next.id].short} » s'ouvre devant toi : ${next.brickCount} nouvelles briques${next.hasFormula ? ' et une nouvelle formule' : ''} t'attendent.`,
+          title: STRATA_META[done.id].clearedTitle,
+          body: `Un sceau se brise. ${STRATA_META[next.id].name} s'ouvre devant toi : ${next.brickCount} nouvelles briques${next.hasFormula ? ' et une nouvelle formule' : ''} t'attendent.`,
           cta: 'map'
         });
       } else {
         events.push({
           id: `strate-${done.id}-${Date.now()}`,
           emoji: '🏛️',
-          title: 'Les 3 Strates sont franchies !',
+          title: STRATA_META[done.id].clearedTitle,
           body: cur.boss
-            ? 'Le dernier verrou est levé : la Porte du Gardien du Seuil est ouverte. Es-tu prêt à briser les 10 Sceaux ?'
-            : "Plus qu'un verrou : restaure tes briques fissurées pour descendre la Porte du Gardien du Seuil.",
+            ? 'Tu as traversé toute la tour et le dernier verrou est levé : la Porte du Gardien du Seuil est ouverte. Es-tu prêt à briser les 10 Sceaux ?'
+            : "Tu as traversé toute la tour. Plus qu'un verrou : restaure tes briques fissurées pour ouvrir la Porte du Gardien du Seuil.",
           cta: cur.boss ? 'boss' : 'map'
         });
       }
@@ -782,7 +783,7 @@ export default function App({
             {/* Compteur de Briques */}
             <div className="px-2.5 py-1 rounded-lg bg-stone-800/90 border border-stone-700 text-xs flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-amber-400" />
-              <span className="font-semibold text-amber-100">
+              <span className="font-semibold text-amber-100 whitespace-nowrap">
                 {srsDiagnostics.unlockedBricks.length}/32
               </span>
             </div>
@@ -797,7 +798,7 @@ export default function App({
               title="Intégrité globale du Codex (SRS)"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>{srsDiagnostics.avgIntegrity}%</span>
+              <span className="whitespace-nowrap">{srsDiagnostics.avgIntegrity}%</span>
             </div>
 
             {/* Bouton Audio */}
@@ -1051,7 +1052,7 @@ export default function App({
               }`}
             >
               <MapIcon className="w-5 h-5" />
-              <span className="text-[11px] font-medium mt-0.5">Carte (1A-1C)</span>
+              <span className="text-[11px] font-medium mt-0.5">Carte</span>
             </button>
 
             <button
@@ -1473,21 +1474,21 @@ function CampScreen({
         {/* Compteurs des 3 Piliers */}
         <div className="grid grid-cols-3 gap-2.5 mt-5 pt-4 border-t border-stone-800/80">
           <div className="bg-stone-950/70 border border-stone-800 rounded-xl p-3">
-            <div className="text-[11px] text-stone-400 uppercase tracking-wider">1. Vocabulaire</div>
+            <div className="text-[10px] sm:text-[11px] text-stone-400 uppercase tracking-wide">1. Vocabulaire</div>
             <div className="text-lg sm:text-xl font-serif font-bold text-sky-300 mt-0.5">
               {unlockedBricks.length}{' '}
               <span className="text-xs font-sans text-stone-500">/ 32 Briques</span>
             </div>
           </div>
           <div className="bg-stone-950/70 border border-stone-800 rounded-xl p-3">
-            <div className="text-[11px] text-stone-400 uppercase tracking-wider">2. Logique</div>
+            <div className="text-[10px] sm:text-[11px] text-stone-400 uppercase tracking-wide">2. Logique</div>
             <div className="text-lg sm:text-xl font-serif font-bold text-emerald-300 mt-0.5">
               {unlockedFormulas.length}{' '}
               <span className="text-xs font-sans text-stone-500">/ 3 Formules</span>
             </div>
           </div>
           <div className="bg-stone-950/70 border border-stone-800 rounded-xl p-3">
-            <div className="text-[11px] text-stone-400 uppercase tracking-wider">3. Boss Audio</div>
+            <div className="text-[10px] sm:text-[11px] text-stone-400 uppercase tracking-wide">3. Boss Audio</div>
             <div className="text-lg sm:text-xl font-serif font-bold text-amber-300 mt-0.5">
               {saveState.bossDefeated ? 'Vaincu' : 'Scellé'}
             </div>
@@ -1561,7 +1562,7 @@ function CampScreen({
               </div>
               <div>
                 <div className="text-xs text-sky-400 font-semibold uppercase">
-                  Expédition en cours • Strate {nextUncompletedNode.subtierId}
+                  Expédition en cours • {STRATA_META[nextUncompletedNode.subtierId as StrataId].name}
                 </div>
                 <h3 className="font-serif font-bold text-lg text-stone-100">
                   {nextUncompletedNode.title}
@@ -1578,7 +1579,7 @@ function CampScreen({
             >
               <Play className="w-5 h-5 fill-current" />
               <span>
-                Poursuivre l'expédition : Strate {nextUncompletedNode.subtierId} (3 min)
+                Poursuivre l'expédition : {STRATA_META[nextUncompletedNode.subtierId as StrataId].short} (3 min)
               </span>
             </button>
           </div>
@@ -1590,7 +1591,7 @@ function CampScreen({
               </div>
               <div>
                 <h3 className="font-serif font-bold text-lg text-amber-100">
-                  Les 3 Strates sont complètes et aucune brique n'est fissurée !
+                  Tu as traversé toute la tour et aucune brique n'est fissurée !
                 </h3>
                 <p className="text-xs sm:text-sm text-stone-300 mt-0.5">
                   Les 4 verrous du Seuil sont levés. Tu peux affronter la Statue Parlante dans l'Antre du Gardien.
@@ -1804,9 +1805,9 @@ function AdventurePath({
   const steps: Array<{ key: string; label: string; state: 'done' | 'current' | 'locked'; sub: string; boss?: boolean }> = [
     ...strata.map((s) => ({
       key: s.id,
-      label: `Strate ${s.id}`,
+      label: STRATA_META[s.id].short,
       state: s.state as 'done' | 'current' | 'locked',
-      sub: s.state === 'locked' ? 'Scellée' : s.done ? 'Terminée' : `${s.doneCount}/${s.total}`
+      sub: s.state === 'locked' ? 'À découvrir' : s.done ? 'Terminée' : `${s.doneCount}/${s.total}`
     })),
     {
       key: 'boss',
@@ -1837,7 +1838,7 @@ function AdventurePath({
       <div className="flex items-start">
         {steps.map((s, i) => (
           <React.Fragment key={s.key}>
-            <div className="flex flex-col items-center text-center w-16 shrink-0">
+            <div className="flex flex-col items-center text-center w-[4.75rem] shrink-0">
               <div
                 className={`w-10 h-10 rounded-full border-2 flex items-center justify-center ${
                   s.state === 'done'
@@ -1854,7 +1855,9 @@ function AdventurePath({
                 ) : s.boss ? (
                   <Skull className="w-5 h-5" />
                 ) : (
-                  <span className="font-serif font-bold text-sm">{s.key}</span>
+                  <span className="font-serif font-bold text-sm">
+                    {STRATA_META[s.key as StrataId]?.numeral ?? s.key}
+                  </span>
                 )}
               </div>
               <div className={`text-[11px] font-semibold mt-1 ${s.state === 'locked' ? 'text-stone-500' : 'text-stone-200'}`}>
@@ -1908,7 +1911,7 @@ function MapScreen({
           Carte Verticale du Palier I : Le Seuil de Pierre
         </h2>
         <p className="text-xs sm:text-sm text-stone-400">
-          Chaque étape ouvre la suivante : termine une Strate pour franchir le seuil de la prochaine, puis affronte le Gardien.
+          Chaque étape ouvre la suivante : traverse les trois lieux de la tour, du Parvis aux Cryptes, puis affronte le Gardien du Seuil.
         </p>
       </div>
 
@@ -1942,7 +1945,7 @@ function MapScreen({
                 </h3>
                 <p className="text-xs text-stone-400 mt-0.5">
                   {sealed
-                    ? `Scellée. Termine la Strate ${previous?.id} pour franchir ce seuil : ${sp.brickCount} nouvelles briques${
+                    ? `La porte est scellée. Traverse ${previous ? STRATA_META[previous.id].the : 'le lieu précédent'} pour l'ouvrir : ${sp.brickCount} nouvelles briques${
                         sp.hasFormula ? ' et 1 formule' : ''
                       } t'y attendent.`
                     : `${sp.brickCount} briques${sp.hasFormula ? ' et 1 formule' : ''} • ${sp.doneCount}/${sp.total} étapes terminées`}
@@ -1999,13 +2002,16 @@ function MapScreen({
                         )}
                       </div>
                       <div>
+                        <div className="text-[10px] uppercase tracking-widest text-stone-500 font-semibold">
+                          {isStele ? '⬢ Stèle' : '◇ Gisement'}
+                        </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <span
                             className={`font-serif font-bold text-sm sm:text-base ${
                               isLocked ? 'text-stone-500' : 'text-stone-100'
                             }`}
                           >
-                            {isLocked && sealed ? (isStele ? 'Stèle scellée' : 'Gisement scellé') : node.title}
+                            {isLocked && sealed ? '? ? ?' : node.title}
                           </span>
                           {isCompleted && (
                             <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-600/40">
@@ -2123,7 +2129,7 @@ function MapScreen({
         </div>
         {!bossUnlocked && missingLocks.length > 0 && (
           <p className="text-xs text-stone-400">
-            Pour ouvrir la Porte : {missingLocks.map((m) => m.hint.toLowerCase()).join(', ')}.
+            Pour ouvrir la Porte : {missingLocks.map((m) => m.hint).join(', ')}.
           </p>
         )}
       </div>
@@ -2239,7 +2245,7 @@ function GrimoireScreen({
                       </span>
                     </div>
                     <div className="text-xs text-stone-400 mt-0.5">
-                      Strate {selectedBrick.subtierId} • Catégorie :{' '}
+                      {STRATA_META[selectedBrick.subtierId as StrataId].short} • Catégorie :{' '}
                       <span className="text-stone-200 font-medium">
                         {POS_STYLES[selectedBrick.pos]?.label}
                       </span>
@@ -2350,7 +2356,7 @@ function GrimoireScreen({
               </div>
               <div className="font-serif font-bold text-stone-300">Brique non découverte</div>
               <p className="text-xs text-stone-400">
-                Elle se cache dans la Strate {selectedBrick.subtierId}. Progresse sur la Carte pour la récolter et révéler son sens, sa prononciation et son astuce.
+                Elle se cache dans {STRATA_META[selectedBrick.subtierId as StrataId].the}. Progresse sur la Carte pour la récolter et révéler son sens, sa prononciation et son astuce.
               </p>
             </div>
           )}
@@ -2367,7 +2373,7 @@ function GrimoireScreen({
                     : 'bg-stone-900 border-stone-800 text-stone-400'
                 }`}
               >
-                {st === 'ALL' ? 'Toutes (32)' : `Strate ${st}`}
+                {st === 'ALL' ? 'Toutes (32)' : STRATA_META[st].short}
               </button>
             ))}
           </div>
@@ -2391,7 +2397,7 @@ function GrimoireScreen({
                       ? ? ?
                     </div>
                     <div className="text-xs font-medium text-stone-600 mt-2">Non découverte</div>
-                    <div className="text-[10px] text-stone-700">Strate {brick.subtierId}</div>
+                    <div className="text-[10px] text-stone-700">{STRATA_META[brick.subtierId as StrataId].short}</div>
                   </div>
                 );
               }
@@ -2443,11 +2449,11 @@ function GrimoireScreen({
                   </div>
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">
-                      Strate {form.subtierId}
+                      {STRATA_META[form.subtierId as StrataId].name}
                     </div>
                     <div className="font-serif font-bold text-stone-400">Formule scellée</div>
                     <div className="text-xs text-stone-500">
-                      Déchiffre-la en franchissant la Stèle de la Strate {form.subtierId} sur la Carte.
+                      Déchiffre-la en franchissant la stèle {STRATA_META[form.subtierId as StrataId].ofShort}, sur la Carte.
                     </div>
                   </div>
                 </div>
@@ -2461,7 +2467,7 @@ function GrimoireScreen({
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-xs font-semibold uppercase tracking-wider text-amber-400">
-                      Strate {form.subtierId}
+                      {STRATA_META[form.subtierId as StrataId].name}
                     </span>
                     <h3 className="text-lg font-serif font-bold text-stone-100">{form.name}</h3>
                   </div>
